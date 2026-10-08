@@ -1,0 +1,92 @@
+body {
+  margin: 0 5%;
+  line-height: 1.8;
+  text-align: justify;
+  font-family: serif;
+}
+
+p {
+  text-indent: 2em;
+  margin: 0 0 0.6em 0;
+}
+
+h1,
+h2 {
+  text-align: center;
+  font-weight: bold;
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+.chapter-title {
+  margin: 2em 0 1.5em;
+  font-size: 1.3em;
+}
+
+.volume-page {
+  page-break-before: always;
+  text-align: center;
+  padding-top: 30%;
+}
+
+.volume-title {
+  font-size: 1.8em;
+  letter-spacing: 0.2em;
+}
+
+.illus {
+  text-align: center;
+  margin: 0;
+  padding: 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.illus + .illus {
+  page-break-before: always;
+  break-before: always;
+}
+
+.illus img {
+  max-width: 100%;
+  max-height: 95vh;
+  height: auto;
+}
+
+.cover {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.cover img {
+  height: 100%;
+  max-width: 100%;
+}
+
+.titlepage {
+  text-align: center;
+  padding-top: 20%;
+}
+
+.titlepage h1 {
+  font-size: 1.6em;
+  margin-bottom: 1em;
+}
+
+.titlepage .meta {
+  text-align: left;
+  margin: 2em 10%;
+  line-height: 1.6;
+}
+
+.titlepage .intro {
+  text-align: justify;
+  text-indent: 2em;
+  margin-top: 1.5em;
+}
+
+.missing-image {
+  text-align: center;
+  color: #666;
+}
