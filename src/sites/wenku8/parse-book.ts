@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import type { Book } from '../types.js';
+import type { Book } from '../../types.js';
 
 const FIELD_RE = /^(文库分类|小说作者|文章状态|最后更新|全文长度)[：:](.*)$/;
 
@@ -47,11 +47,7 @@ export function parseBookPage(html: string): Partial<Book> {
     const container = introHeading.parent();
     const spans = container.find('span');
     if (spans.length >= 2) {
-      partial.intro = spans
-        .eq(1)
-        .text()
-        .replace(/\s+/g, ' ')
-        .trim();
+      partial.intro = spans.eq(1).text().replace(/\s+/g, ' ').trim();
     } else {
       const full = container.text().replace(/内容简介[：:]?\s*/, '');
       if (full.trim()) {

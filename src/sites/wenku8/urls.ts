@@ -1,4 +1,13 @@
 const BASE = 'https://www.wenku8.net';
+const HOSTS = new Set(['www.wenku8.net', 'wenku8.net', 'wenku8.com', 'www.wenku8.com']);
+
+/**
+ * 判断 hostname 是否属于 wenku8
+ * @param hostname - 主机名
+ */
+export function isWenku8Host(hostname: string): boolean {
+  return HOSTS.has(hostname.toLowerCase());
+}
 
 /**
  * 书号对应的路径前缀（floor(bookId/1000)）
@@ -27,7 +36,7 @@ export function bookInfoPageUrl(bookId: string): string {
 }
 
 /**
- * 章节页 URL（相对目录页）
+ * 章节页 URL
  * @param bookId - 书籍 ID
  * @param chapterId - 章节 ID
  */
@@ -37,7 +46,7 @@ export function chapterPageUrl(bookId: string, chapterId: string): string {
 }
 
 /**
- * 封面缩略图 URL
+ * 封面图 URL
  * @param bookId - 书籍 ID
  * @param large - 是否尝试大图（去掉 s）
  */
@@ -64,5 +73,5 @@ export function parseBookId(input: string): string {
   if (bookMatch) {
     return bookMatch[1];
   }
-  throw new Error(`无法从输入解析书号: ${input}`);
+  throw new Error(`无法从输入解析 wenku8 书号: ${input}`);
 }

@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import type { Book, Chapter, Volume } from '../types.js';
+import type { Book, Chapter, Volume } from '../../types.js';
 
 /**
  * 压缩连续空白为单个空格
@@ -10,11 +10,12 @@ function collapseWs(s: string): string {
 }
 
 /**
- * 解析目录页 HTML 为 Book 骨架
- * @param html - 目录页 HTML（UTF-8 字符串）
+ * 解析目录页 HTML 为 Book 骨架（正文与 URL 由适配器补齐）
+ * @param html - 目录页 HTML
  * @param bookId - 书籍 ID
+ * @param indexUrl - 目录页规范化 URL
  */
-export function parseIndexPage(html: string, bookId: string): Book {
+export function parseIndexPage(html: string, bookId: string, indexUrl: string): Book {
   const $ = cheerio.load(html);
   const title = collapseWs($('#title').text());
   const infoText = $('#info').text();
@@ -28,8 +29,7 @@ export function parseIndexPage(html: string, bookId: string): Book {
     const $td = $(el);
     if ($td.hasClass('vcss')) {
       const vid = $td.attr('vid') ?? '';
-      const volTitle = collapseWs($td.text());
-      currentVolume = { id: vid, title: volTitle, chapters: [] };
+      currentVolume = { id: vid, title: collapseWs($td.text()), chapters: [] };
       volumes.push(currentVolume);
       return;
     }
@@ -43,10 +43,11 @@ export function parseIndexPage(html: string, bookId: string): Book {
       if (!id) {
         return;
       }
-      const chapterTitle = collapseWs($a.text());
       const chapter: Chapter = {
         id,
-        title: chapterTitle,
+        title: collapseWs($a.text()),
+        url: '',
+        access: 'unknown',
         blocks: [],
         isIllustration: false,
       };
@@ -59,6 +60,7 @@ export function parseIndexPage(html: string, bookId: string): Book {
   });
 
   return {
+    source: { site: 'wenku8', bookId, canonicalUrl: indexUrl },
     id: bookId,
     title,
     author,

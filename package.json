@@ -1,9 +1,10 @@
 {
-  "name": "wenku8-epub",
-  "version": "1.0.0",
-  "description": "Convert wenku8.net light novels to EPUB",
+  "name": "book2epub",
+  "version": "2.0.0",
+  "description": "Convert supported light-novel sites to EPUB (multi-site adapter architecture)",
   "type": "module",
   "bin": {
+    "book2epub": "./dist/cli.js",
     "wenku8-epub": "./dist/cli.js"
   },
   "scripts": {
@@ -12,7 +13,8 @@
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:live": "tsx src/cli.ts"
   },
   "engines": {
     "node": ">=20"

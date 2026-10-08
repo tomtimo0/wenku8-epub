@@ -1,12 +1,32 @@
-import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import path from 'node:path';
-import sharp from 'sharp';
-import type { Book, Block, ResolvedImage } from './types.js';
+import type { Book, ResolvedImage } from './types.js';
+import type { ContentCache } from './transports/cache.js';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+/** 单张图片大小上限（默认 12MB） */
+const DEFAULT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
 export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'gif' | 'unknown';
+
+export interface ImageResolveRequest {
+  url: string;
+  headers?: Record<string, string>;
+}
+
+export interface ImageDownloadOptions {
+  cache: ContentCache;
+  site: string;
+  bookId: string;
+  /** 由适配器提供的每 URL 请求策略 */
+  resolveRequest: (url: string) => ImageResolveRequest;
+  imageQuality?: number;
+  maxImageWidth?: number;
+  concurrency: number;
+  maxImageBytes?: number;
+}
 
 /**
  * 根据魔数识别图片格式
@@ -32,10 +52,7 @@ export function detectImageFormat(buf: Buffer): ImageFormat {
   ) {
     return 'webp';
   }
-  if (
-    buf.length >= 6 &&
-    buf.toString('ascii', 0, 3) === 'GIF'
-  ) {
+  if (buf.length >= 6 && buf.toString('ascii', 0, 3) === 'GIF') {
     return 'gif';
   }
   return 'unknown';
@@ -77,53 +94,45 @@ export function extForFormat(format: ImageFormat): string {
   }
 }
 
-export interface ImageDownloadOptions {
-  cacheDir: string;
-  bookId: string;
-  imageQuality?: number;
-  maxImageWidth?: number;
-  concurrency: number;
-}
+/** 私有/保留 IP 段（SSRF 防护，仅做字面判断） */
+const PRIVATE_HOST_RE =
+  /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|::1$|\[::1\]$)/i;
 
 /**
- * 从 URL 提取缓存文件名
- * @param url - 图片 URL
+ * 判断 URL 是否允许下载（仅 http/https，禁止内网与文件协议）
+ * @param url - 目标 URL
  */
-function cacheFileName(url: string): string {
-  const base = url.split('/').pop() ?? 'image';
-  return base.replace(/[^\w.-]+/g, '_');
-}
-
-/**
- * 下载单张图片
- */
-async function downloadOne(
-  url: string,
-  cachePath: string,
-): Promise<Buffer> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await fetch(url, {
-        headers: {
-          Referer: 'https://www.wenku8.net/',
-          'User-Agent': DEFAULT_UA,
-        },
-      });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const buf = Buffer.from(await res.arrayBuffer());
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(cachePath, buf);
-      return buf;
-    } catch (e) {
-      if (attempt === 2) {
-        throw e;
-      }
-      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-    }
+export function isSafeAssetUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
   }
-  throw new Error('unreachable');
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (PRIVATE_HOST_RE.test(host)) {
+    return false;
+  }
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
+    return false;
+  }
+  if (host.endsWith('.local') || host.endsWith('.internal')) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 资产缓存键：URL 的 SHA-256
+ * @param url - 资源 URL
+ * @param ext - 扩展名
+ */
+export function assetCacheKey(url: string, ext: string): string {
+  const hash = crypto.createHash('sha256').update(url).digest('hex');
+  return `${hash}.${ext}`;
 }
 
 /**
@@ -146,9 +155,9 @@ export async function resolveBookImages(
     }
   }
 
-  const cacheRoot = path.join(options.cacheDir, 'images', options.bookId);
   const map = new Map<string, ResolvedImage>();
   const list = [...urls];
+  const maxBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
   let idx = 0;
   const concurrency = Math.max(1, options.concurrency);
 
@@ -159,53 +168,43 @@ export async function resolveBookImages(
         return;
       }
       const url = list[i];
-      const cachePath = path.join(cacheRoot, cacheFileName(url));
-      let buf: Buffer | null = null;
-      try {
-        buf = await fs.readFile(cachePath);
-      } catch {
-        buf = null;
-      }
-      try {
-        if (!buf) {
-          buf = await downloadOne(url, cachePath);
-        }
-        let format = detectImageFormat(buf);
-        let outBuf = buf;
-        let width: number | undefined;
-        let height: number | undefined;
-
-        if (
-          options.imageQuality !== undefined ||
-          options.maxImageWidth !== undefined
-        ) {
-          let pipeline = sharp(buf);
-          const meta = await pipeline.metadata();
-          width = meta.width;
-          height = meta.height;
-          if (
-            options.maxImageWidth &&
-            meta.width &&
-            meta.width > options.maxImageWidth
-          ) {
-            pipeline = pipeline.resize({ width: options.maxImageWidth });
-          }
-          const quality = options.imageQuality ?? 85;
-          outBuf = await pipeline.jpeg({ quality }).toBuffer();
-          format = 'jpeg';
-          const m2 = await sharp(outBuf).metadata();
-          width = m2.width;
-          height = m2.height;
-        }
-
-        const ext = extForFormat(format);
+      if (!isSafeAssetUrl(url)) {
         map.set(url, {
           url,
-          epubPath: `images/${cacheFileName(url)}.${ext}`,
+          epubPath: '',
+          mediaType: '',
+          buffer: Buffer.alloc(0),
+          failed: true,
+        });
+        continue;
+      }
+      try {
+        const { headers } = options.resolveRequest(url);
+        const res = await fetch(url, {
+          headers: { 'User-Agent': DEFAULT_UA, ...headers },
+          redirect: 'follow',
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.byteLength > maxBytes) {
+          throw new Error(`图片超过大小上限 ${maxBytes} 字节`);
+        }
+        const format = detectImageFormat(buf);
+        if (format === 'unknown') {
+          throw new Error('无法识别的图片格式');
+        }
+        const ext = extForFormat(format);
+        await options.cache.writeBuffer(
+          `books/${options.site}/${options.bookId}/assets/${assetCacheKey(url, ext)}`,
+          buf,
+        );
+        map.set(url, {
+          url,
+          epubPath: '',
           mediaType: mediaTypeForFormat(format),
-          buffer: outBuf,
-          width,
-          height,
+          buffer: buf,
         });
       } catch {
         map.set(url, {
@@ -228,7 +227,49 @@ export async function resolveBookImages(
  * @param imageMap - 图片映射
  */
 export function failedImageUrls(imageMap: Map<string, ResolvedImage>): string[] {
-  return [...imageMap.values()]
-    .filter((r) => r.failed)
-    .map((r) => r.url);
+  return [...imageMap.values()].filter((r) => r.failed).map((r) => r.url);
+}
+
+/**
+ * 下载封面候选（按优先级），返回首个成功的图片
+ * @param candidates - 候选 URL 列表
+ * @param resolveRequest - 请求策略
+ */
+export async function fetchCover(
+  candidates: string[],
+  resolveRequest: (url: string) => ImageResolveRequest,
+): Promise<{ buffer: Buffer; mediaType: string } | null> {
+  for (const url of candidates) {
+    if (!isSafeAssetUrl(url)) {
+      continue;
+    }
+    try {
+      const { headers } = resolveRequest(url);
+      const res = await fetch(url, {
+        headers: { 'User-Agent': DEFAULT_UA, ...headers },
+      });
+      if (!res.ok) {
+        continue;
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      const format = detectImageFormat(buf);
+      if (format === 'unknown') {
+        continue;
+      }
+      return { buffer: buf, mediaType: mediaTypeForFormat(format) };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/**
+ * 图片缓存目录的绝对路径（供调试）
+ * @param cacheDir - 缓存根
+ * @param site - 站点
+ * @param bookId - 书号
+ */
+export function assetDir(cacheDir: string, site: string, bookId: string): string {
+  return path.join(cacheDir, 'books', site, bookId, 'assets');
 }

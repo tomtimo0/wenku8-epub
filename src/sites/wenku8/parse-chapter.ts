@@ -1,8 +1,25 @@
 import * as cheerio from 'cheerio';
-import type { Block } from '../types.js';
-import { normalizeLine } from '../text/normalize.js';
 import type { Cheerio, CheerioAPI } from 'cheerio';
 import type { AnyNode, Element } from 'domhandler';
+import type { Block } from '../../types.js';
+import { normalizeLine } from '../../text/normalize.js';
+
+const WATERMARK_RE = /轻小说文库|wenku8\.(com|net)/i;
+
+/**
+ * wenku8 专属行清洗：在通用清洗基础上丢弃站点水印行
+ * @param line - 原始行文本
+ */
+function normalizeWenku8Line(line: string): string | null {
+  const s = normalizeLine(line);
+  if (s === null) {
+    return null;
+  }
+  if (WATERMARK_RE.test(s)) {
+    return null;
+  }
+  return s;
+}
 
 /**
  * 按文档顺序遍历节点，收集段落与图片块
@@ -14,7 +31,7 @@ function walkContent($: CheerioAPI, nodes: Cheerio<AnyNode>): Block[] {
   let lineBuf = '';
 
   const flushLine = (): void => {
-    const normalized = normalizeLine(lineBuf);
+    const normalized = normalizeWenku8Line(lineBuf);
     if (normalized) {
       blocks.push({ kind: 'paragraph', text: normalized });
     }
@@ -66,8 +83,7 @@ export function parseChapterPage(html: string): Block[] {
   const $ = cheerio.load(html);
   const $content = $('#content');
   $content.find('ul[id="contentdp"]').remove();
-  const nodes = $content.contents();
-  return walkContent($, nodes);
+  return walkContent($, $content.contents());
 }
 
 /**
