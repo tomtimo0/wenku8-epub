@@ -2,12 +2,21 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import type { Book, ResolvedImage } from './types.js';
 import type { ContentCache } from './transports/cache.js';
+import { fetchWithSafeRedirects, isSafeHttpUrl } from './net/safe-url.js';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 /** 单张图片大小上限（默认 12MB） */
 const DEFAULT_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+/** 单本书图片下载总量上限（默认 200MB） */
+const DEFAULT_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+
+export { isSafeHttpUrl };
+
+/** 兼容旧名：判断资源 URL 是否可安全下载 */
+export const isSafeAssetUrl = isSafeHttpUrl;
 
 export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'gif' | 'unknown';
 
@@ -26,6 +35,8 @@ export interface ImageDownloadOptions {
   maxImageWidth?: number;
   concurrency: number;
   maxImageBytes?: number;
+  /** 单本书图片总量上限，默认 200MB */
+  maxTotalBytes?: number;
 }
 
 /**
@@ -94,37 +105,6 @@ export function extForFormat(format: ImageFormat): string {
   }
 }
 
-/** 私有/保留 IP 段（SSRF 防护，仅做字面判断） */
-const PRIVATE_HOST_RE =
-  /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|::1$|\[::1\]$)/i;
-
-/**
- * 判断 URL 是否允许下载（仅 http/https，禁止内网与文件协议）
- * @param url - 目标 URL
- */
-export function isSafeAssetUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return false;
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (PRIVATE_HOST_RE.test(host)) {
-    return false;
-  }
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) {
-    return false;
-  }
-  if (host.endsWith('.local') || host.endsWith('.internal')) {
-    return false;
-  }
-  return true;
-}
-
 /**
  * 资产缓存键：URL 的 SHA-256
  * @param url - 资源 URL
@@ -158,6 +138,8 @@ export async function resolveBookImages(
   const map = new Map<string, ResolvedImage>();
   const list = [...urls];
   const maxBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
+  const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  let totalBytes = 0;
   let idx = 0;
   const concurrency = Math.max(1, options.concurrency);
 
@@ -180,9 +162,9 @@ export async function resolveBookImages(
       }
       try {
         const { headers } = options.resolveRequest(url);
-        const res = await fetch(url, {
+        // 手动跟随重定向，逐跳校验目标地址，阻止跳到私网/非 http(s)
+        const res = await fetchWithSafeRedirects(url, {
           headers: { 'User-Agent': DEFAULT_UA, ...headers },
-          redirect: 'follow',
         });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -191,6 +173,10 @@ export async function resolveBookImages(
         if (buf.byteLength > maxBytes) {
           throw new Error(`图片超过大小上限 ${maxBytes} 字节`);
         }
+        if (totalBytes + buf.byteLength > maxTotalBytes) {
+          throw new Error(`图片总量超过上限 ${maxTotalBytes} 字节`);
+        }
+        totalBytes += buf.byteLength;
         const format = detectImageFormat(buf);
         if (format === 'unknown') {
           throw new Error('无法识别的图片格式');
@@ -245,7 +231,7 @@ export async function fetchCover(
     }
     try {
       const { headers } = resolveRequest(url);
-      const res = await fetch(url, {
+      const res = await fetchWithSafeRedirects(url, {
         headers: { 'User-Agent': DEFAULT_UA, ...headers },
       });
       if (!res.ok) {
