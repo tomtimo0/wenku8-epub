@@ -1,6 +1,7 @@
 import type { SiteAdapter } from './site.js';
 import { Wenku8Adapter } from './sites/wenku8/index.js';
 import { TaduAdapter } from './sites/tadu/index.js';
+import { GenericAdapter } from './sites/generic/index.js';
 
 export interface AdapterSelection {
   adapter: SiteAdapter;
@@ -9,10 +10,18 @@ export interface AdapterSelection {
 }
 
 /**
- * 内置适配器（按优先级从高到低）
+ * 默认内置适配器（不含实验性通用探测）
  */
 export function defaultAdapters(): SiteAdapter[] {
   return [new Wenku8Adapter(), new TaduAdapter()];
+}
+
+/**
+ * 启用实验特性时的适配器列表：在默认列表末尾追加最低优先级的通用探测适配器。
+ * 只有用户显式 `--experimental-auto` 时才应使用本列表。
+ */
+export function experimentalAdapters(): SiteAdapter[] {
+  return [...defaultAdapters(), new GenericAdapter()];
 }
 
 /**

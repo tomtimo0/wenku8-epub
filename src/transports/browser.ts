@@ -123,6 +123,28 @@ export class BrowserTransport {
   }
 
   /**
+   * 打开页面并返回渲染后的完整 HTML（用于 CSR 站点的探测与正文提取）。
+   * @param url - 目标 URL
+   * @param waitSelector - 可选：需先出现的选择器
+   * @param settleMs - 选择器出现后的额外等待，给异步注入留时间
+   */
+  async renderHtml(
+    url: string,
+    waitSelector?: string,
+    settleMs = 800,
+  ): Promise<string> {
+    const page = this.getPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    if (waitSelector) {
+      await page
+        .waitForSelector(waitSelector, { timeout: 30_000 })
+        .catch(() => {});
+    }
+    await page.waitForTimeout(settleMs);
+    return page.content();
+  }
+
+  /**
    * 暴露当前页面（供适配器做站点级交互）
    */
   getPage(): Page {
