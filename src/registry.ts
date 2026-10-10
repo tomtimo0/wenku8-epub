@@ -2,6 +2,7 @@ import type { SiteAdapter } from './site.js';
 import { Wenku8Adapter } from './sites/wenku8/index.js';
 import { TaduAdapter } from './sites/tadu/index.js';
 import { GenericAdapter } from './sites/generic/index.js';
+import { loadAllRules, rulesToAdapters } from './sites/rules/loader.js';
 
 export interface AdapterSelection {
   adapter: SiteAdapter;
@@ -22,6 +23,26 @@ export function defaultAdapters(): SiteAdapter[] {
  */
 export function experimentalAdapters(): SiteAdapter[] {
   return [...defaultAdapters(), new GenericAdapter()];
+}
+
+/**
+ * 加载手写适配器 + 声明式规则 + 可选通用探测
+ * @param options - 规则与实验开关
+ */
+export async function allAdapters(options?: {
+  cacheRoot?: string;
+  experimental?: boolean;
+  ruleFile?: string;
+}): Promise<SiteAdapter[]> {
+  const rules = await loadAllRules({
+    cacheRoot: options?.cacheRoot,
+    extraFile: options?.ruleFile,
+  });
+  const list: SiteAdapter[] = [...defaultAdapters(), ...rulesToAdapters(rules)];
+  if (options?.experimental) {
+    list.push(new GenericAdapter());
+  }
+  return list;
 }
 
 /**
@@ -77,24 +98,4 @@ export function selectAdapter(
     );
   }
   return { adapter: scored[0].adapter };
-}
-
-/**
- * 检查适配器合规门禁是否允许运行
- * @param adapter - 站点适配器
- * @param acknowledgePermission - 用户是否显式确认已获许可
- */
-export function assertAdapterAllowed(
-  adapter: SiteAdapter,
-  acknowledgePermission: boolean,
-): void {
-  const policy = adapter.policy;
-  if (!policy?.requiresWrittenPermission) {
-    return;
-  }
-  if (!acknowledgePermission) {
-    throw new Error(
-      `${adapter.displayName} 适配器默认禁用。${policy.notice ?? ''}`,
-    );
-  }
 }

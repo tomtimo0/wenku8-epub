@@ -1,5 +1,6 @@
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import type { Charset } from './http.js';
+import type { CookieJar } from './cookies.js';
 
 export interface BrowserTransportOptions {
   /** 持久化用户目录 */
@@ -8,6 +9,10 @@ export interface BrowserTransportOptions {
   headless: boolean;
   /** 优先使用的浏览器 channel */
   channel?: string;
+  /** 页面池大小（等于章节并发） */
+  poolSize?: number;
+  /** 用户中断信号 */
+  signal?: AbortSignal;
 }
 
 export interface BrowserHtmlResult {
@@ -21,8 +26,11 @@ export interface BrowserHtmlResult {
  */
 export class BrowserTransport {
   private context: BrowserContext | null = null;
-  private page: Page | null = null;
+  private defaultPage: Page | null = null;
+  private pool: Page[] = [];
+  private poolInUse = new Set<Page>();
   private closed = false;
+  private starting: Promise<void> | null = null;
 
   /**
    * @param options - 传输配置
@@ -30,9 +38,22 @@ export class BrowserTransport {
   constructor(private readonly options: BrowserTransportOptions) {}
 
   /**
-   * 启动持久化浏览器上下文并注册退出清理
+   * 懒启动持久化浏览器上下文
    */
-  async start(): Promise<void> {
+  async ensureStarted(): Promise<void> {
+    if (this.context) {
+      return;
+    }
+    if (this.starting) {
+      await this.starting;
+      return;
+    }
+    this.starting = this.launch();
+    await this.starting;
+    this.starting = null;
+  }
+
+  private async launch(): Promise<void> {
     const base = {
       headless: this.options.headless,
       viewport: { width: 1280, height: 800 },
@@ -49,13 +70,54 @@ export class BrowserTransport {
         base,
       );
     }
-    this.page = this.context.pages()[0] ?? (await this.context.newPage());
-    const onExit = (): void => {
-      void this.close();
-    };
-    process.once('SIGINT', onExit);
-    process.once('SIGTERM', onExit);
-    process.once('beforeExit', onExit);
+    this.defaultPage = this.context.pages()[0] ?? (await this.context.newPage());
+    await this.setupPage(this.defaultPage);
+    const size = Math.max(1, this.options.poolSize ?? 1);
+    this.pool = [this.defaultPage];
+    while (this.pool.length < size) {
+      const p = await this.context.newPage();
+      await this.setupPage(p);
+      this.pool.push(p);
+    }
+  }
+
+  /**
+   * 拦截静态资源以加快正文页渲染
+   * @param page - Playwright 页面
+   */
+  private async setupPage(page: Page): Promise<void> {
+    await page.route('**/*', (route) => {
+      const type = route.request().resourceType();
+      if (type === 'image' || type === 'font' || type === 'media') {
+        void route.abort();
+        return;
+      }
+      void route.continue();
+    });
+  }
+
+  /**
+   * 从池中借用一个页面（章节并发时各 worker 独占）
+   */
+  async acquirePage(): Promise<Page> {
+    await this.ensureStarted();
+    if (this.options.signal?.aborted) {
+      throw new Error('已中断');
+    }
+    const free = this.pool.find((p) => !this.poolInUse.has(p));
+    if (!free) {
+      throw new Error('浏览器页面池已满');
+    }
+    this.poolInUse.add(free);
+    return free;
+  }
+
+  /**
+   * 归还页面到池
+   * @param page - 借用的页面
+   */
+  releasePage(page: Page): void {
+    this.poolInUse.delete(page);
   }
 
   /**
@@ -76,6 +138,9 @@ export class BrowserTransport {
     });
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (this.options.signal?.aborted) {
+        throw new Error('已中断');
+      }
       if (await page.evaluate(check)) {
         return;
       }
@@ -145,13 +210,52 @@ export class BrowserTransport {
   }
 
   /**
-   * 暴露当前页面（供适配器做站点级交互）
+   * 将浏览器 Cookie 同步到 HTTP CookieJar
+   * @param jar - 目标容器
+   */
+  async syncCookiesTo(jar: CookieJar): Promise<void> {
+    if (!this.context) {
+      return;
+    }
+    jar.importPlaywright(await this.context.cookies());
+  }
+
+  /**
+   * 质询页时等待用户验证（最多 180 秒）
+   * @param url - 探测 URL
+   */
+  async ensureChallengePassed(url: string): Promise<void> {
+    await this.ensureStarted();
+    const page = this.getPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline) {
+      if (this.options.signal?.aborted) {
+        throw new Error('已中断');
+      }
+      const challenged = await page.evaluate(() => {
+        const t = document.title;
+        return /Just a moment|请稍候|Checking your browser/i.test(t);
+      });
+      if (!challenged) {
+        return;
+      }
+      if (this.options.headless) {
+        console.warn('检测到质询页：若持续失败请使用 --headful 完成验证');
+      }
+      await page.waitForTimeout(2000);
+    }
+    throw new Error('质询页验证超时（180s）');
+  }
+
+  /**
+   * 暴露默认页面（单页 fetch / ensureReady）
    */
   getPage(): Page {
-    if (!this.page) {
-      throw new Error('浏览器传输层未启动');
+    if (!this.defaultPage) {
+      throw new Error('浏览器传输层未启动，请先调用 ensureStarted()');
     }
-    return this.page;
+    return this.defaultPage;
   }
 
   /**
@@ -165,7 +269,9 @@ export class BrowserTransport {
     if (this.context) {
       await this.context.close().catch(() => {});
       this.context = null;
-      this.page = null;
+      this.defaultPage = null;
+      this.pool = [];
+      this.poolInUse.clear();
     }
   }
 }

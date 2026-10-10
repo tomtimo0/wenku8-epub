@@ -1,0 +1,16 @@
+[
+  {
+    "id": "wenku8-smoke",
+    "url": "https://www.wenku8.net/novel/2/2896/index.htm",
+    "limitChapters": 1,
+    "minOkChapters": 1,
+    "args": ["--no-images", "--limit-chapters", "1"]
+  },
+  {
+    "id": "tadu-smoke",
+    "url": "https://www.tadu.com/book/catalogue/1020572",
+    "limitChapters": 1,
+    "minOkChapters": 1,
+    "args": ["--limit-chapters", "1", "--no-images"]
+  }
+]

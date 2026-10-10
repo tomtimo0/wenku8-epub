@@ -1,5 +1,6 @@
 import type { Book, Chapter, SourceRef } from '../../types.js';
 import type {
+  AdapterCapabilities,
   AssetRequest,
   ChapterFetchResult,
   ScrapeContext,
@@ -28,6 +29,12 @@ export class Wenku8Adapter implements SiteAdapter {
   readonly id = 'wenku8';
   readonly displayName = '轻小说文库';
   readonly parserVersion = '1.0.0';
+  readonly capabilities: AdapterCapabilities = {
+    chapterNeedsPage: false,
+    needsBrowser: true,
+    minIntervalMs: 1500,
+    maxConcurrency: 1,
+  };
 
   private readyUrl: string | null = null;
 
@@ -101,10 +108,10 @@ export class Wenku8Adapter implements SiteAdapter {
     chapter: Chapter,
     ctx: ScrapeContext,
   ): Promise<ChapterFetchResult> {
-    // 兼容旧版缓存布局 .cache/html/{bookId}/{chapterId}.html（迁移期只读）
-    const legacyHtml = await ctx.cache.readText(
-      `html/${book.source.bookId}/${chapter.id}.html`,
-    );
+    // 兼容旧版缓存布局 .cache/html/{bookId}/{chapterId}.html（迁移期只读；--refresh 时跳过）
+    const legacyHtml = ctx.refresh
+      ? null
+      : await ctx.cache.readText(`html/${book.source.bookId}/${chapter.id}.html`);
     if (legacyHtml) {
       const legacyBlocks = parseChapterPage(legacyHtml);
       if (legacyBlocks.length > 0) {
@@ -162,6 +169,7 @@ export class Wenku8Adapter implements SiteAdapter {
     if (this.readyUrl === indexUrl) {
       return;
     }
+    await ctx.browser.ensureChallengePassed(indexUrl);
     await ctx.browser.ensureReady(indexUrl, () => {
       const title = document.title;
       const badTitle = title.includes('请稍候') || /Just a moment/i.test(title);

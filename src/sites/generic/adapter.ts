@@ -1,5 +1,6 @@
 import type { Book, Chapter, SourceRef } from '../../types.js';
 import type {
+  AdapterCapabilities,
   AssetRequest,
   ChapterFetchResult,
   ScrapeContext,
@@ -15,12 +16,18 @@ import { deriveBookId, probeGeneric, type ProbeTransport } from './probe.js';
  * 通用启发式适配器（实验，最低优先级）。
  *
  * 仅在用户显式启用（`--experimental-auto`）时才会被注册与选用；默认未达置信度门槛
- * 会明确拒绝，不会"猜中一部分后静默生成残缺 EPUB"。参见 docs/TADU_MULTI_SITE_PLAN.md §6。
+ * 会明确拒绝，不会"猜中一部分后静默生成残缺 EPUB"。参见 docs/ROADMAP.md W5。
  */
 export class GenericAdapter implements SiteAdapter {
   readonly id = 'generic';
   readonly displayName = '通用探测（实验）';
   readonly parserVersion = '0.1.0';
+  readonly capabilities: AdapterCapabilities = {
+    chapterNeedsPage: false,
+    needsBrowser: true,
+    minIntervalMs: 1500,
+    maxConcurrency: 1,
+  };
 
   /**
    * 最低优先级：任何安全的 http(s) URL 记 1 分，永远让位于已注册站点。

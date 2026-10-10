@@ -1,0 +1,24 @@
+{
+  "id": "fic-static",
+  "name": "虚构静态站（示例规则）",
+  "version": "1.0.0",
+  "match": { "hosts": ["novel.example.com"] },
+  "charset": "auto",
+  "fetch": { "catalogue": "http", "chapter": "http", "minIntervalMs": 800 },
+  "book": {
+    "title": { "meta": "og:title" },
+    "author": { "meta": "og:novel:author" },
+    "intro": { "meta": "og:description" },
+    "cover": { "meta": "og:image" }
+  },
+  "catalogue": {
+    "chapter": ".chapter-list a",
+    "order": "asc"
+  },
+  "chapter": {
+    "content": "article",
+    "remove": ["nav", "footer"],
+    "paragraphMode": "auto"
+  },
+  "assets": { "referer": "origin" }
+}

@@ -19,6 +19,29 @@ export interface TaduChapterParseResult {
 }
 
 /**
+ * 解码塔读 `data-limit`（明文数字或 Base64 编码的数字 ID）
+ * @param limit - 属性原始值
+ */
+export function decodeTaduDataLimit(limit: string): string {
+  const trimmed = limit.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return trimmed;
+  }
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim();
+    if (/^\d+$/.test(decoded)) {
+      return decoded;
+    }
+  } catch {
+    // 非 Base64，按原值处理
+  }
+  return trimmed;
+}
+
+/**
  * 判断一行是否命中站点推广句式
  * @param line - 已清洗的行
  */
@@ -30,7 +53,7 @@ function isPromotion(line: string): boolean {
  * 解析浏览器渲染后的 `#partContent` HTML 为 Block[]。
  * 纯函数，仅做结构性解析与推广过滤，不发起任何网络请求。
  * @param html - 渲染后 DOM（含 #partContent）的 HTML
- * @param currentChapterId - 当前章节 ID，用于识别可疑 data-limit 节点
+ * @param currentChapterId - 当前章节 ID，用于识别推广段（data-limit 解码后相等则剔除）
  */
 export function parseTaduRenderedChapter(
   html: string,
@@ -44,7 +67,6 @@ export function parseTaduRenderedChapter(
   }
 
   const blocks: Block[] = [];
-  let suspiciousCount = 0;
   let promotionCount = 0;
 
   container.children().each((_, el) => {
@@ -66,9 +88,13 @@ export function parseTaduRenderedChapter(
       return;
     }
 
-    const limit = $el.attr('data-limit');
-    if (limit && currentChapterId && limit.trim() === currentChapterId) {
-      suspiciousCount++;
+    const rawLimit = $el.attr('data-limit');
+    if (rawLimit && currentChapterId) {
+      const decoded = decodeTaduDataLimit(rawLimit);
+      if (decoded === currentChapterId) {
+        promotionCount++;
+        return;
+      }
     }
 
     const text = collectParagraphText($, $el);
@@ -82,11 +108,6 @@ export function parseTaduRenderedChapter(
     blocks.push({ kind: 'paragraph', text });
   });
 
-  if (suspiciousCount > 0) {
-    warnings.push(
-      `检测到 ${suspiciousCount} 个 data-limit 与当前章节 ID 相同的可疑节点`,
-    );
-  }
   if (promotionCount > 0) {
     warnings.push(`过滤站点推广段落 ${promotionCount} 段`);
   }
@@ -125,6 +146,29 @@ function collectParagraphText(
   };
   walk($p.get(0) as AnyNode);
   const raw = pieces.join('');
-  // 段内换行先统一为空格（缩进交给 CSS），再走通用清洗
   return normalizeLine(raw.replace(/\n+/g, ' ')) ?? '';
+}
+
+/**
+ * 与目录声明字数比对，偏差过大时记为可疑
+ * @param blocks - 正文块
+ * @param expectedCharacters - 目录声明字数
+ */
+export function taduCharacterWarnings(
+  blocks: Block[],
+  expectedCharacters?: number,
+): string[] {
+  if (expectedCharacters === undefined) {
+    return [];
+  }
+  const total = blocks
+    .filter((b): b is Extract<Block, { kind: 'paragraph' }> => b.kind === 'paragraph')
+    .reduce((n, b) => n + b.text.length, 0);
+  const threshold = Math.max(80, expectedCharacters * 0.08);
+  if (Math.abs(total - expectedCharacters) > threshold) {
+    return [
+      `字数 ${total} 与目录声明 ${expectedCharacters} 偏差超过阈值（±${Math.round(threshold)}）`,
+    ];
+  }
+  return [];
 }

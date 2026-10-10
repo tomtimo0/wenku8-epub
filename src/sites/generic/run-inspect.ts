@@ -37,7 +37,7 @@ export async function runInspect(
     profileDir: cache.pathFor(browserProfileDir('generic')),
     headless: options.headless,
   });
-  await browser.start();
+  await browser.ensureStarted();
 
   try {
     const { report } = await probeGeneric(

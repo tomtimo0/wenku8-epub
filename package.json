@@ -14,7 +14,7 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:live": "tsx src/cli.ts"
+    "test:live": "node scripts/test-live.mjs"
   },
   "engines": {
     "node": ">=20"

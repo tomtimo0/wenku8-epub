@@ -90,7 +90,7 @@ describe('buildEpub', () => {
     expect(await mime?.async('string')).toBe('application/epub+zip');
 
     const opf = await zip.file('OEBPS/content.opf')?.async('string');
-    expect(opf).toContain('urn:bookscraper:wenku8:1');
+    expect(opf).toContain('urn:book2epub:wenku8:1');
     const idrefs = [...(opf?.matchAll(/idref="([^"]+)"/g) ?? [])].map((m) => m[1]);
     const manifestIds = [...(opf?.matchAll(/<item id="([^"]+)"/g) ?? [])].map(
       (m) => m[1],

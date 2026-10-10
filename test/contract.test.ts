@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SiteAdapter } from '../src/site.js';
 import { defaultAdapters } from '../src/registry.js';
+import { loadAllRules, rulesToAdapters } from '../src/sites/rules/loader.js';
 import { TaduAdapter } from '../src/sites/tadu/index.js';
 import { Wenku8Adapter } from '../src/sites/wenku8/index.js';
 
@@ -73,28 +74,27 @@ describe('adapter registry', () => {
   });
 });
 
-describe('tadu policy gate（防守）', () => {
-  it('即使被启用也不下载正文，返回受限', async () => {
+describe('builtin rules', () => {
+  it('内置规则可匹配并 resolve', async () => {
+    const loaded = await loadAllRules();
+    expect(loaded.length).toBeGreaterThanOrEqual(2);
+    for (const entry of loaded) {
+      const adapter = rulesToAdapters([entry])[0];
+      const host = entry.rule.match.hosts[0];
+      const url = `https://${host}/book/1234/`;
+      expect(adapter.match(url)).toBeGreaterThan(0);
+      const ref = await adapter.resolve(url);
+      expect(ref.site).toBe(entry.rule.id);
+      expect(ref.canonicalUrl).toMatch(/^https:\/\//);
+    }
+  });
+});
+
+describe('tadu capabilities', () => {
+  it('声明浏览器与页面池能力', () => {
     const adapter = new TaduAdapter();
-    const book = {
-      source: {
-        site: 'tadu',
-        bookId: '1',
-        canonicalUrl: 'https://www.tadu.com/book/catalogue/1',
-      },
-      id: '1',
-      title: 't',
-      author: 'a',
-      volumes: [],
-    };
-    const result = await adapter.fetchChapter(book, {
-      id: '1',
-      title: '第一章',
-      url: 'https://www.tadu.com/book/1/1/',
-      access: 'public',
-      blocks: [],
-      isIllustration: false,
-    });
-    expect(result.status).toBe('restricted');
+    expect(adapter.capabilities.needsBrowser).toBe(true);
+    expect(adapter.capabilities.chapterNeedsPage).toBe(true);
+    expect(adapter.parserVersion).toMatch(/^0\.2/);
   });
 });

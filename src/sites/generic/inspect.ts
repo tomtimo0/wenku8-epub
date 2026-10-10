@@ -508,3 +508,39 @@ export function scoreContentCandidates(html: string): ContentInspection {
   candidates.sort((a, b) => b.score - a.score);
   return { candidates, best: candidates[0] };
 }
+
+/**
+ * 向下收缩正文容器（子节点覆盖 ≥85% 文本时改选子节点）
+ * @param html - 章节页 HTML
+ * @param selector - 初始选择器
+ */
+export function shrinkContentRoot(html: string, selector: string): string {
+  const $ = cheerio.load(html);
+  let el = $(selector).first();
+  if (el.length === 0) {
+    return selector;
+  }
+  const textLen = (): number => collapse(el.text()).length;
+  for (let depth = 0; depth < 12; depth++) {
+    let best: ReturnType<typeof $> | null = null;
+    let bestLen = 0;
+    const parentLen = textLen();
+    el.children().each((_, child) => {
+      const c = $(child);
+      const len = collapse(c.text()).length;
+      if (parentLen > 0 && len / parentLen >= 0.85 && len > bestLen) {
+        best = c;
+        bestLen = len;
+      }
+    });
+    if (!best) {
+      break;
+    }
+    el = best;
+  }
+  const id = el.attr('id');
+  if (id) {
+    return `#${id}`;
+  }
+  return selector;
+}

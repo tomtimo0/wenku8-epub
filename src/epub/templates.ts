@@ -64,6 +64,7 @@ export interface TitlePageFields {
   intro?: string;
   sourceSite?: string;
   sourceUrl?: string;
+  scrapedAt?: string;
 }
 
 /**
@@ -92,6 +93,9 @@ export function titlePageXhtml(fields: TitlePageFields): string {
   }
   if (fields.sourceUrl) {
     meta.push(`来源链接：${escapeXml(fields.sourceUrl)}`);
+  }
+  if (fields.scrapedAt) {
+    meta.push(`抓取日期：${escapeXml(fields.scrapedAt)}`);
   }
   const metaHtml = meta.length
     ? `<div class="meta">${meta.map((m) => `<p>${m}</p>`).join('')}</div>`
@@ -181,6 +185,7 @@ export function contentOpf(params: {
   title: string;
   author: string;
   modified: string;
+  sourceUrl?: string;
   manifest: ManifestItem[];
   spine: Array<{ id: string; linear?: 'no' }>;
   coverId?: string;
@@ -218,6 +223,7 @@ export function contentOpf(params: {
     <dc:title>${escapeXml(params.title)}</dc:title>
     <dc:creator>${escapeXml(params.author)}</dc:creator>
     <dc:language>zh-CN</dc:language>
+    ${params.sourceUrl ? `<dc:source>${escapeXml(params.sourceUrl)}</dc:source>` : ''}
     <meta property="dcterms:modified">${params.modified}</meta>${coverMeta}${collectionMeta}
   </metadata>
   <manifest>

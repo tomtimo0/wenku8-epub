@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  assertAdapterAllowed,
-  defaultAdapters,
-  selectAdapter,
-} from '../src/registry.js';
+import { defaultAdapters, selectAdapter } from '../src/registry.js';
 import { TaduAdapter } from '../src/sites/tadu/index.js';
 import { Wenku8Adapter } from '../src/sites/wenku8/index.js';
 
@@ -37,14 +33,16 @@ describe('selectAdapter', () => {
   });
 });
 
-describe('assertAdapterAllowed', () => {
-  it('缺少许可时拒绝塔读，确认后放行', () => {
+describe('adapter capabilities', () => {
+  it('塔读支持章节页面池并发', () => {
     const tadu = new TaduAdapter();
-    expect(() => assertAdapterAllowed(tadu, false)).toThrow(/书面许可|默认禁用/);
-    expect(() => assertAdapterAllowed(tadu, true)).not.toThrow();
+    expect(tadu.capabilities.chapterNeedsPage).toBe(true);
+    expect(tadu.capabilities.maxConcurrency).toBe(2);
   });
 
-  it('wenku8 无需许可', () => {
-    expect(() => assertAdapterAllowed(new Wenku8Adapter(), false)).not.toThrow();
+  it('wenku8 需要浏览器但单页抓取', () => {
+    const wk = new Wenku8Adapter();
+    expect(wk.capabilities.needsBrowser).toBe(true);
+    expect(wk.capabilities.chapterNeedsPage).toBe(false);
   });
 });

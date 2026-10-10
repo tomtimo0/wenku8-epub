@@ -1,0 +1,19 @@
+{
+  "id": "fic-paging",
+  "name": "虚构章内分页站（示例规则）",
+  "version": "1.0.0",
+  "match": { "hosts": ["paging.example.com"] },
+  "charset": "auto",
+  "book": {
+    "title": "h1.book-title",
+    "author": ".author-name"
+  },
+  "catalogue": {
+    "chapter": ".toc a.chapter-link"
+  },
+  "chapter": {
+    "content": "#content",
+    "nextPage": { "selector": "a.next-page", "samePattern": "/ch/\\d+" },
+    "remove": [".ads"]
+  }
+}

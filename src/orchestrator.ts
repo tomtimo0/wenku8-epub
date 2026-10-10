@@ -17,6 +17,15 @@ import {
   firstIllusImageInVolume,
   parseVolumeRange,
 } from './illus.js';
+import { RunController } from './core/run.js';
+import { CookieJar, siteCookiesPath } from './transports/cookies.js';
+import { buildTxt } from './output/txt.js';
+import { verifyEpubBuffer } from './output/verify.js';
+import {
+  emptyRunState,
+  patchChapterRun,
+  type BookRunState,
+} from './core/run-state.js';
 
 export interface RunOptions {
   out: string;
@@ -33,6 +42,10 @@ export interface RunOptions {
   includePlaceholders: boolean;
   strict: boolean;
   limitChapters?: number;
+  format?: 'epub' | 'txt' | 'both';
+  txtCrlf?: boolean;
+  verifyEpub?: boolean;
+  onlyMissing?: boolean;
 }
 
 interface CachedChapter {
@@ -52,14 +65,7 @@ interface ChapterStats {
   suspect: number;
 }
 
-/**
- * 随机抖动延迟
- * @param baseMs - 基础间隔
- */
-function jitterDelay(baseMs: number): Promise<void> {
-  const ms = Math.max(300, baseMs + Math.floor(Math.random() * 1000) - 500);
-  return new Promise((r) => setTimeout(r, ms));
-}
+type ProgressStatus = 'ok' | 'restricted' | 'failed' | 'suspect' | 'cached-ok';
 
 /**
  * 应用抓取结果到章节
@@ -80,29 +86,47 @@ function applyResult(chapter: Chapter, result: ChapterFetchResult): void {
  * @param adapter - 已选站点适配器
  * @param options - 运行选项
  * @param cacheRoot - 缓存根目录
+ * @returns 进程退出码
  */
 export async function runConvert(
   input: string,
   adapter: SiteAdapter,
   options: RunOptions,
   cacheRoot: string,
-): Promise<void> {
+): Promise<number> {
+  const run = new RunController();
   const cache = new ContentCache(cacheRoot);
-  const http = new HttpTransport({ minIntervalMs: options.delay });
+  const minInterval = adapter.capabilities.minIntervalMs ?? options.delay;
+  const cookieJar = new CookieJar();
+  await cookieJar.load(siteCookiesPath(cacheRoot, adapter.id));
+  const http = new HttpTransport({ minIntervalMs: minInterval, cookieJar });
+  const maxConcurrency = Math.min(
+    adapter.capabilities.maxConcurrency,
+    Math.max(1, options.concurrency),
+  );
   const browser = new BrowserTransport({
     profileDir: cache.pathFor(browserProfileDir(adapter.id)),
     headless: options.headless,
+    poolSize: adapter.capabilities.chapterNeedsPage ? maxConcurrency : 1,
+    signal: run.signal,
   });
-  await browser.start();
 
-  const ctx: ScrapeContext = { http, browser, cache };
+  const ctx: ScrapeContext = {
+    http,
+    browser,
+    cache,
+    signal: run.signal,
+    refresh: options.refresh,
+  };
   const stats: ChapterStats = { ok: 0, restricted: 0, failed: 0, suspect: 0 };
   const notes: string[] = [];
+  let runState: BookRunState | null = null;
 
   try {
     const ref = await adapter.resolve(input);
     console.log(`站点 ${adapter.id}（${adapter.displayName}）书号 ${ref.bookId}`);
     const book = await fetchBookWithFallback(adapter, ref, ctx, cache);
+    runState = await loadRunState(cache, adapter.id, ref.bookId);
 
     let volumeIndices: number[] | null = null;
     if (options.volumes) {
@@ -115,27 +139,68 @@ export async function runConvert(
       `《${book.title}》${book.author} — ${book.volumes.length} 卷 ${totalChapters} 章`,
     );
 
-    await fetchAllChapters(adapter, book, ctx, options, stats, notes);
+    const startedAt = Date.now();
+    await fetchAllChapters(
+      adapter,
+      book,
+      ctx,
+      options,
+      stats,
+      notes,
+      runState,
+      maxConcurrency,
+      startedAt,
+    );
+
+    if (run.aborted) {
+      await persistRunState(cache, adapter.id, ref.bookId, runState);
+      return 130;
+    }
+
+    if (stats.ok === 0) {
+      report(adapter, book, new Map(), stats, notes, options);
+      await persistRunState(cache, adapter.id, ref.bookId, runState);
+      await cookieJar.save(siteCookiesPath(cacheRoot, adapter.id));
+      return 3;
+    }
 
     const imageMap = await collectImages(adapter, book, options, cache);
-
     const chapterImagePaths = buildChapterImagePathMap(book, imageMap);
     await fs.mkdir(options.out, { recursive: true });
 
     const cover = await resolveCover(adapter, book);
 
+    const format = options.format ?? 'epub';
+    const writeEpub = format === 'epub' || format === 'both';
+    const writeTxt = format === 'txt' || format === 'both';
+
     if (options.split === 'full') {
-      const buf = await buildEpub({
-        book,
-        cover,
-        imageMap,
-        chapterImagePaths,
-        illusPosition: options.illusPosition,
-        includePlaceholders: options.includePlaceholders,
-      });
-      const outPath = path.join(options.out, `${sanitizeFileName(book.title)}.epub`);
-      await fs.writeFile(outPath, buf);
-      console.log(`已写入 ${outPath}`);
+      const baseName = sanitizeFileName(book.title);
+      if (writeEpub) {
+        const buf = await buildEpub({
+          book,
+          cover,
+          imageMap,
+          chapterImagePaths,
+          illusPosition: options.illusPosition,
+          includePlaceholders: options.includePlaceholders,
+        });
+        const outPath = path.join(options.out, `${baseName}.epub`);
+        await fs.writeFile(outPath, buf);
+        if (options.verifyEpub) {
+          const v = await verifyEpubBuffer(buf);
+          if (!v.ok) {
+            throw new Error(`EPUB 自检失败：${v.errors.join('; ')}`);
+          }
+        }
+        console.log(`已写入 ${outPath}`);
+      }
+      if (writeTxt) {
+        const txtPath = path.join(options.out, `${baseName}.txt`);
+        const txtBuf = buildTxt({ book, crlf: options.txtCrlf });
+        await fs.writeFile(txtPath, txtBuf);
+        console.log(`已写入 ${txtPath}`);
+      }
     } else {
       const originalVolumes = book.volumes;
       for (let i = 0; i < originalVolumes.length; i++) {
@@ -161,9 +226,42 @@ export async function runConvert(
     }
 
     report(adapter, book, imageMap, stats, notes, options);
+    await persistRunState(cache, adapter.id, ref.bookId, runState);
+    await browser.syncCookiesTo(cookieJar);
+    await cookieJar.save(siteCookiesPath(cacheRoot, adapter.id));
+    return RunController.exitCode(stats, options.strict);
   } finally {
     await browser.close();
   }
+}
+
+/**
+ * 读取或初始化 run.json
+ */
+async function loadRunState(
+  cache: ContentCache,
+  site: string,
+  bookId: string,
+): Promise<BookRunState> {
+  const key = `${bookCachePrefix(site, bookId)}/run.json`;
+  const existing = await cache.readJson<BookRunState>(key);
+  return existing ?? emptyRunState(site, bookId);
+}
+
+/**
+ * 持久化 run.json
+ */
+async function persistRunState(
+  cache: ContentCache,
+  site: string,
+  bookId: string,
+  state: BookRunState | null,
+): Promise<void> {
+  if (!state) {
+    return;
+  }
+  const key = `${bookCachePrefix(site, bookId)}/run.json`;
+  await cache.writeJson(key, state);
 }
 
 /**
@@ -204,6 +302,9 @@ async function fetchAllChapters(
   options: RunOptions,
   stats: ChapterStats,
   notes: string[],
+  runState: BookRunState,
+  concurrency: number,
+  startedAt: number,
 ): Promise<void> {
   const tasks: Array<{ volume: Volume; vi: number; chapter: Chapter; ci: number }> = [];
   book.volumes.forEach((volume, vi) => {
@@ -217,11 +318,14 @@ async function fetchAllChapters(
       ? tasks.slice(0, options.limitChapters)
       : tasks;
 
-  const concurrency = Math.min(2, Math.max(1, options.concurrency));
   let next = 0;
+  let completed = 0;
 
   const worker = async (): Promise<void> => {
     while (true) {
+      if (ctx.signal?.aborted) {
+        return;
+      }
       const i = next++;
       if (i >= targets.length) {
         return;
@@ -233,6 +337,12 @@ async function fetchAllChapters(
       if (t.chapter.access === 'restricted') {
         stats.restricted++;
         notes.push(`受限：${t.chapter.title}`);
+        patchChapterRun(runState, t.chapter.id, {
+          status: 'restricted',
+          lastError: '站点标记为受限',
+        });
+        completed++;
+        logProgress(t, targets.length, completed, startedAt, 'restricted');
         continue;
       }
 
@@ -240,20 +350,26 @@ async function fetchAllChapters(
       if (!options.refresh) {
         cached = await ctx.cache.readJson<CachedChapter>(cacheKey);
       }
-      // 失败结果不落盘/不复用，以便下次续抓
       if (cached && cached.status === 'failed') {
         cached = null;
       }
       if (cached && cached.parserVersion === adapter.parserVersion) {
-        applyCached(t.chapter, cached, stats, notes);
-        logProgress(t, targets.length);
+        const status = applyCached(t.chapter, cached, stats, notes);
+        patchChapterRun(runState, t.chapter.id, {
+          status: status === 'suspect' ? 'suspect' : cached.status === 'ok' ? 'ok' : 'failed',
+          fetchedAt: cached.fetchedAt,
+        });
+        completed++;
+        logProgress(t, targets.length, completed, startedAt, status);
         continue;
       }
 
-      await jitterDelay(options.delay);
-      const result = await fetchWithRetry(adapter, book, t.chapter, ctx);
+      if (adapter.capabilities.needsBrowser) {
+        await ctx.browser.ensureStarted();
+      }
 
-      // 仅缓存可复用的结果；失败不落盘，保证断点续抓
+      const result = await fetchWithRetry(adapter, book, t.chapter, ctx, options);
+
       if (result.status !== 'failed') {
         await ctx.cache.writeJson(cacheKey, {
           parserVersion: adapter.parserVersion,
@@ -266,8 +382,26 @@ async function fetchAllChapters(
         } satisfies CachedChapter);
       }
 
-      handleResult(result, t.chapter, stats, notes, options);
-      logProgress(t, targets.length);
+      const progressStatus = handleResult(result, t.chapter, stats, notes, options);
+      const runStatus =
+        progressStatus === 'cached-ok'
+          ? 'ok'
+          : progressStatus === 'ok' && result.status === 'ok' && result.warnings.length
+            ? 'suspect'
+            : progressStatus;
+      patchChapterRun(runState, t.chapter.id, {
+        status: runStatus,
+        attempts: (runState.chapters[t.chapter.id]?.attempts ?? 0) + 1,
+        lastError:
+          result.status !== 'ok' && result.status !== 'restricted'
+            ? result.reason
+            : result.status === 'restricted'
+              ? result.reason
+              : undefined,
+        fetchedAt: new Date().toISOString(),
+      });
+      completed++;
+      logProgress(t, targets.length, completed, startedAt, progressStatus);
     }
   };
 
@@ -282,9 +416,13 @@ async function fetchWithRetry(
   book: Book,
   chapter: Chapter,
   ctx: ScrapeContext,
+  options: RunOptions,
 ): Promise<ChapterFetchResult> {
   let last: ChapterFetchResult = { status: 'failed', reason: 'unknown', retryable: true };
   for (let attempt = 0; attempt < 3; attempt++) {
+    if (ctx.signal?.aborted) {
+      return { status: 'failed', reason: '已中断', retryable: false };
+    }
     try {
       last = await adapter.fetchChapter(book, chapter, ctx);
     } catch (e) {
@@ -297,6 +435,9 @@ async function fetchWithRetry(
     if (last.status !== 'failed' || !last.retryable) {
       return last;
     }
+    if (options.strict) {
+      return last;
+    }
     await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
   }
   return last;
@@ -304,13 +445,14 @@ async function fetchWithRetry(
 
 /**
  * 应用缓存结果
+ * @returns 用于进度行的状态
  */
 function applyCached(
   chapter: Chapter,
   cached: CachedChapter,
   stats: ChapterStats,
   notes: string[],
-): void {
+): ProgressStatus {
   if (cached.status === 'ok' && cached.blocks) {
     chapter.blocks = cached.blocks;
     chapter.isIllustration =
@@ -321,18 +463,23 @@ function applyCached(
       for (const w of cached.warnings) {
         notes.push(`可疑：${chapter.title} — ${w}`);
       }
+      return 'suspect';
     }
-  } else if (cached.status === 'restricted') {
+    return 'cached-ok';
+  }
+  if (cached.status === 'restricted') {
     stats.restricted++;
     notes.push(`受限：${chapter.title} — ${cached.reason ?? ''}`);
-  } else {
-    stats.failed++;
-    notes.push(`失败：${chapter.title} — ${cached.reason ?? ''}`);
+    return 'restricted';
   }
+  stats.failed++;
+  notes.push(`失败：${chapter.title} — ${cached.reason ?? ''}`);
+  return 'failed';
 }
 
 /**
  * 处理抓取结果
+ * @returns 用于进度行的状态
  */
 function handleResult(
   result: ChapterFetchResult,
@@ -340,7 +487,7 @@ function handleResult(
   stats: ChapterStats,
   notes: string[],
   options: RunOptions,
-): void {
+): ProgressStatus {
   if (result.status === 'ok') {
     applyResult(chapter, result);
     stats.ok++;
@@ -349,17 +496,27 @@ function handleResult(
       for (const w of result.warnings) {
         notes.push(`可疑：${chapter.title} — ${w}`);
       }
+      if (options.strict) {
+        throw new Error(`严格模式：章节内容可疑 ${chapter.title}`);
+      }
+      return 'suspect';
     }
-  } else if (result.status === 'restricted') {
+    return 'ok';
+  }
+  if (result.status === 'restricted') {
     stats.restricted++;
     notes.push(`受限：${chapter.title} — ${result.reason}`);
-  } else {
-    stats.failed++;
-    notes.push(`失败：${chapter.title} — ${result.reason}`);
     if (options.strict) {
-      throw new Error(`严格模式：章节抓取失败 ${chapter.title}`);
+      throw new Error(`严格模式：章节受限 ${chapter.title}`);
     }
+    return 'restricted';
   }
+  stats.failed++;
+  notes.push(`失败：${chapter.title} — ${result.reason}`);
+  if (options.strict) {
+    throw new Error(`严格模式：章节抓取失败 ${chapter.title}`);
+  }
+  return 'failed';
 }
 
 /**
@@ -417,10 +574,26 @@ function volumeCover(
  */
 function logProgress(
   t: { volume: Volume; vi: number; chapter: Chapter; ci: number },
-  _total: number,
+  total: number,
+  completed: number,
+  startedAt: number,
+  status: ProgressStatus,
 ): void {
+  const symbol =
+    status === 'ok' || status === 'cached-ok'
+      ? '✓'
+      : status === 'restricted'
+        ? '⊘'
+        : status === 'suspect'
+          ? '⚠'
+          : '✗';
+  const elapsed = Math.round((Date.now() - startedAt) / 1000);
+  const eta =
+    completed > 0
+      ? Math.round((elapsed / completed) * (total - completed))
+      : 0;
   console.log(
-    `[卷 ${t.vi + 1}] [章 ${t.ci + 1}/${t.volume.chapters.length}] ${t.chapter.title} ✓`,
+    `[${completed}/${total}] [卷 ${t.vi + 1}] ${t.chapter.title} ${symbol} （已用 ${elapsed}s，约剩 ${eta}s）`,
   );
 }
 
@@ -456,5 +629,8 @@ function report(
   }
   if (stats.suspect > 0 && !options.strict) {
     console.log('提示：存在内容可疑章节，可用 --strict 让其失败。');
+  }
+  if (stats.ok === 0) {
+    console.log('未生成 EPUB：没有成功抓取的章节。');
   }
 }

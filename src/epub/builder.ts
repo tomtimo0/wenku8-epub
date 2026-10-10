@@ -106,7 +106,8 @@ export async function buildEpub(options: BuildEpubOptions): Promise<Buffer> {
   const book = options.book;
   const volumes = options.volumeFilter ?? book.volumes;
   const source = book.source;
-  const identifier = `urn:bookscraper:${source.site}:${source.bookId}`;
+  const identifier = `urn:book2epub:${source.site}:${source.bookId}`;
+  const scrapedAt = new Date().toISOString().slice(0, 10);
 
   const zip = new JSZip();
   // EPUB 规范：mimetype 必须是第一个条目且不压缩，因此先写入它再创建其它条目
@@ -179,6 +180,7 @@ export async function buildEpub(options: BuildEpubOptions): Promise<Buffer> {
     intro: book.intro,
     sourceSite: source.site,
     sourceUrl: source.canonicalUrl,
+    scrapedAt,
   };
   if (options.seriesTitle && options.groupPosition !== undefined) {
     titleFields.title = `${book.title} ${volumes[0]?.title ?? ''}`.trim();
@@ -198,6 +200,12 @@ export async function buildEpub(options: BuildEpubOptions): Promise<Buffer> {
   let bodyStartHref = 'text/titlepage.xhtml';
   let vi = 0;
   for (const volume of volumes) {
+    const renderableInVolume = volume.chapters.filter(
+      (c) => isRenderable(c) || options.includePlaceholders,
+    );
+    if (renderableInVolume.length === 0) {
+      continue;
+    }
     vi++;
     const volFile = `text/v${vi}.xhtml`;
     oebps.file(volFile, volumeXhtml(volume.title));
@@ -258,6 +266,7 @@ export async function buildEpub(options: BuildEpubOptions): Promise<Buffer> {
       title: opfTitle,
       author: book.author,
       modified,
+      sourceUrl: source.canonicalUrl,
       manifest: [
         ...manifest,
         { id: 'ncx', href: 'toc.ncx', mediaType: 'application/x-dtbncx+xml' },

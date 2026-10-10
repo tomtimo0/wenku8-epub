@@ -4,8 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseTaduCatalogue } from '../src/sites/tadu/parse-catalogue.js';
 import { parseTaduBookPage } from '../src/sites/tadu/parse-book.js';
-import { parseTaduRenderedChapter } from '../src/sites/tadu/parse-rendered-chapter.js';
-import { TADU_POLICY } from '../src/sites/tadu/policy.js';
+import {
+  decodeTaduDataLimit,
+  parseTaduRenderedChapter,
+  taduCharacterWarnings,
+} from '../src/sites/tadu/parse-rendered-chapter.js';
 import {
   catalogueUrl,
   parseTaduInput,
@@ -95,6 +98,13 @@ describe('tadu parseBookPage', () => {
   });
 });
 
+describe('tadu data-limit', () => {
+  it('解码 Base64 章节 ID', () => {
+    expect(decodeTaduDataLimit('MTAxODI2OTA4')).toBe('101826908');
+    expect(decodeTaduDataLimit('101826908')).toBe('101826908');
+  });
+});
+
 describe('tadu parseRenderedChapter', () => {
   it('按 DOM 顺序生成块并过滤推广与可疑节点', () => {
     const { blocks, warnings } = parseTaduRenderedChapter(
@@ -112,7 +122,6 @@ describe('tadu parseRenderedChapter', () => {
       text: '第二段虚构正文。 换行后的同一段。',
     });
     expect(blocks[2]).toMatchObject({ kind: 'image' });
-    expect(warnings.some((w) => w.includes('可疑节点'))).toBe(true);
     expect(warnings.some((w) => w.includes('推广段落'))).toBe(true);
   });
 
@@ -123,9 +132,9 @@ describe('tadu parseRenderedChapter', () => {
   });
 });
 
-describe('tadu policy', () => {
-  it('默认禁用且要求书面许可', () => {
-    expect(TADU_POLICY.requiresWrittenPermission).toBe(true);
-    expect(TADU_POLICY.enabled).toBe(false);
+describe('taduCharacterWarnings', () => {
+  it('字数偏差过大时告警', () => {
+    const blocks = [{ kind: 'paragraph' as const, text: '短' }];
+    expect(taduCharacterWarnings(blocks, 1034).length).toBe(1);
   });
 });
