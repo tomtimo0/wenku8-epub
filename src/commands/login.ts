@@ -6,6 +6,7 @@ import { defaultAdapters } from '../registry.js';
 const LOGIN_URLS: Record<string, string> = {
   tadu: 'https://www.tadu.com/',
   wenku8: 'https://www.wenku8.net/',
+  qidiy: 'https://www.qidiy.com/',
 };
 
 /**
@@ -20,7 +21,7 @@ export async function runLogin(siteOrUrl: string, cacheRoot: string): Promise<vo
   if (/^https?:\/\//i.test(trimmed)) {
     const matched = adapters.find((a) => a.match(trimmed) > 0);
     if (!matched) {
-      throw new Error('无法从 URL 识别站点，请使用站点 id：tadu | wenku8');
+      throw new Error('无法从 URL 识别站点，请使用站点 id：tadu | wenku8 | qidiy');
     }
     siteId = matched.id;
   } else {

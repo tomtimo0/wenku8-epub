@@ -198,6 +198,7 @@ export class BrowserTransport {
     waitSelector?: string,
     settleMs = 800,
   ): Promise<string> {
+    await this.ensureChallengePassed(url);
     const page = this.getPage();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     if (waitSelector) {
@@ -229,19 +230,34 @@ export class BrowserTransport {
     const page = this.getPage();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
     const deadline = Date.now() + 180_000;
+    let challengeHintLogged = false;
     while (Date.now() < deadline) {
       if (this.options.signal?.aborted) {
         throw new Error('已中断');
       }
-      const challenged = await page.evaluate(() => {
-        const t = document.title;
-        return /Just a moment|请稍候|Checking your browser/i.test(t);
-      });
+      let challenged = true;
+      try {
+        challenged = await page.evaluate(() => {
+          const t = document.title;
+          return /Just a moment|请稍候|Checking your browser/i.test(t);
+        });
+      } catch {
+        // CF 验证通过后会整页跳转，evaluate 可能因上下文销毁而失败，稍等再判
+        await page.waitForTimeout(500);
+        continue;
+      }
       if (!challenged) {
         return;
       }
-      if (this.options.headless) {
-        console.warn('检测到质询页：若持续失败请使用 --headful 完成验证');
+      if (!challengeHintLogged) {
+        challengeHintLogged = true;
+        if (this.options.headless) {
+          console.warn('检测到 Cloudflare 质询页：若持续失败请使用 --headful 在浏览器窗口内完成验证');
+        } else {
+          console.warn(
+            '检测到 Cloudflare 质询页：请在程序弹出的 Chromium 窗口中完成验证（勾选/等待通过），不要关闭窗口；通过后程序会自动继续（最多等待 180 秒）',
+          );
+        }
       }
       await page.waitForTimeout(2000);
     }

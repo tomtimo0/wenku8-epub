@@ -11,7 +11,10 @@ import { htmlToBlocks } from '../../extract/dom-text.js';
 import { classifyHttpResponse } from '../../transports/classify.js';
 import * as cheerio from 'cheerio';
 import type { SiteRule } from './schema.js';
-import { parseRuleCatalogue } from './parse-catalogue.js';
+import {
+  findCatalogueNextPage,
+  parseRuleCatalogueMerged,
+} from './catalogue-pages.js';
 
 export type RuleSource = 'builtin' | 'user' | 'learned' | 'cli';
 
@@ -85,11 +88,31 @@ export class RuleAdapter implements SiteAdapter {
 
   /** @inheritdoc */
   async fetchBook(ref: SourceRef, ctx: ScrapeContext): Promise<Book> {
-    const html = await this.fetchPage(ref.canonicalUrl, 'catalogue', ctx);
-    const book = parseRuleCatalogue(this.rule, html, ref.bookId, ref.canonicalUrl);
+    const pages: string[] = [];
+    let url = ref.canonicalUrl;
+    const visited = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      if (visited.has(url)) {
+        break;
+      }
+      visited.add(url);
+      const html = await this.fetchPage(url, 'catalogue', ctx);
+      pages.push(html);
+      const next = findCatalogueNextPage(this.rule, html, url);
+      if (!next || visited.has(next)) {
+        break;
+      }
+      url = next;
+    }
+    const book = parseRuleCatalogueMerged(
+      this.rule,
+      pages,
+      ref.bookId,
+      ref.canonicalUrl,
+    );
     const prefix = bookCachePrefix(this.id, ref.bookId);
     await ctx.cache.writeJson(`${prefix}/book.json`, book);
-    await ctx.cache.writeText(`${prefix}/catalogue.html`, html);
+    await ctx.cache.writeText(`${prefix}/catalogue.html`, pages.join('\n<!-- page -->\n'));
     return book;
   }
 
@@ -172,7 +195,8 @@ export class RuleAdapter implements SiteAdapter {
         : (this.rule.fetch?.chapter ?? 'http');
     if (mode === 'browser') {
       await ctx.browser.ensureStarted();
-      return ctx.browser.renderHtml(url, this.rule.fetch?.waitFor);
+      await ctx.browser.ensureChallengePassed(url);
+      return ctx.browser.renderHtml(url, this.rule.fetch?.waitFor, 1500);
     }
     const res = await ctx.http.get(url, {
       charset: this.rule.charset ?? 'auto',

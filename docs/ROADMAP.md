@@ -24,9 +24,9 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm test` | 7 个文件 58 个用例全部通过 |
+| `npm test` | 14 个文件 83 个用例全部通过（含规则分页、qidiy 虚构夹具） |
 | `npx tsc --noEmit` / `npm run build` | 通过 |
-| `.gitignore` | `.cache/`、`output/`、`dist/`、`scaffold/`、`*.epub` 均已忽略，仓库中无抓取产物 |
+| `.gitignore` | `.cache/`、`/output/`（仅仓库根）、`dist/`、`scaffold/`、`*.epub` 均已忽略；`src/output/` 为源码目录 |
 
 ### 1.2 端到端实测
 

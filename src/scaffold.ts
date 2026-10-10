@@ -1,10 +1,63 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import type { InspectionReport } from './sites/generic/index.js';
+import type { SiteRule } from './sites/rules/schema.js';
 
 export interface ScaffoldResult {
   dir: string;
   files: string[];
+}
+
+/**
+ * 依据探测报告生成声明式 SiteRule JSON（推荐路径，可直接放入 rules/ 或 builtin）。
+ * @param siteId - 站点 id
+ * @param inspection - inspect 诊断
+ * @param outDir - 输出目录
+ */
+export async function scaffoldRule(
+  siteId: string,
+  inspection: InspectionReport,
+  outDir: string,
+): Promise<ScaffoldResult> {
+  if (!/^[a-z][a-z0-9-]*$/.test(siteId)) {
+    throw new Error(`站点 id 必须是 [a-z][a-z0-9-]*，收到：${siteId}`);
+  }
+  const host = new URL(inspection.url).hostname;
+  const chapterSelector = inspection.contentCandidates[0]?.selector ?? 'article';
+  const cataloguePattern = inspection.catalogue[0]?.pattern ?? '/chapter/';
+  const chapterLink = cataloguePattern.includes('/')
+    ? `a[href*="${cataloguePattern.split('/').filter(Boolean)[0] ?? 'chapter'}"]`
+    : `a[href*="${cataloguePattern}"]`;
+  const rule: SiteRule = {
+    id: siteId,
+    name: inspection.title ?? siteId,
+    version: '1.0.0',
+    match: { hosts: [host] },
+    charset: 'auto',
+    fetch: {
+      catalogue: 'http',
+      chapter: 'http',
+      minIntervalMs: 1200,
+    },
+    book: {
+      title: inspection.title ? { selector: 'h1' } : { meta: 'og:title' },
+      author: { selector: 'body', regex: '作者[：:]\\s*([^\\n<]+)' },
+      cover: { meta: 'og:image' },
+    },
+    catalogue: {
+      chapter: chapterLink,
+      nextPage: 'a[rel=next], .pagebtn a, .pagination a',
+    },
+    chapter: {
+      content: chapterSelector,
+      remove: ['script', 'style', 'nav', 'header', 'footer', 'aside'],
+      paragraphMode: 'auto',
+    },
+  };
+  await fs.mkdir(outDir, { recursive: true });
+  const full = path.join(outDir, `${siteId}.json`);
+  await fs.writeFile(full, `${JSON.stringify(rule, null, 2)}\n`, 'utf8');
+  return { dir: outDir, files: [full] };
 }
 
 /**

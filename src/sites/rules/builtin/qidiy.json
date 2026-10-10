@@ -1,0 +1,30 @@
+{
+  "id": "qidiy",
+  "name": "启迪小说",
+  "version": "1.0.0",
+  "match": { "hosts": ["qidiy.com", "www.qidiy.com"] },
+  "charset": "auto",
+  "fetch": {
+    "catalogue": "browser",
+    "chapter": "browser",
+    "minIntervalMs": 1500,
+    "waitFor": "#content, .content, #chaptercontent, .showtxt"
+  },
+  "book": {
+    "title": "h1",
+    "author": { "selector": "body", "regex": "作者[：:]\\s*([^\\n<]+)" },
+    "intro": { "selector": "meta[name=description]", "attr": "content" }
+  },
+  "catalogue": {
+    "root": ".listmain, #list, .chapter-list, .box_con",
+    "chapter": "a[href*='/book/'][href$='.html']",
+    "nextPage": ".pagebtn a, .pages a, .pagination a"
+  },
+  "chapter": {
+    "content": "#content, .content, #chaptercontent, .showtxt",
+    "remove": ["script", "style", "nav", ".pagebtn", ".pages"],
+    "paragraphMode": "auto"
+  },
+  "errorPage": { "title": "出错了" },
+  "assets": { "referer": "page" }
+}

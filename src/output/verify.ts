@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import JSZip from 'jszip';
 
 export interface VerifyResult {
@@ -58,6 +62,37 @@ export async function verifyEpubBuffer(buffer: Buffer): Promise<VerifyResult> {
         errors.push(`${name} 不是合法 XHTML`);
       }
     }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * 结构自检；若设置了 EPUBCHECK_JAR 且内置自检通过，再运行 epubcheck
+ * @param buffer - EPUB 二进制
+ */
+export async function verifyEpubBufferWithEpubcheck(buffer: Buffer): Promise<VerifyResult> {
+  const base = await verifyEpubBuffer(buffer);
+  const errors = [...base.errors];
+  const jar = process.env.EPUBCHECK_JAR?.trim();
+  if (!jar || !base.ok) {
+    return { ok: errors.length === 0, errors };
+  }
+  const tmp = path.join(os.tmpdir(), `book2epub-verify-${Date.now()}.epub`);
+  try {
+    await fs.writeFile(tmp, buffer);
+    const run = spawnSync('java', ['-jar', jar, tmp], {
+      encoding: 'utf8',
+      timeout: 120_000,
+      windowsHide: true,
+    });
+    if (run.error) {
+      errors.push(`epubcheck 无法启动：${run.error.message}`);
+    } else if (run.status !== 0) {
+      const detail = `${run.stdout ?? ''}\n${run.stderr ?? ''}`.trim().slice(0, 4000);
+      errors.push(`epubcheck 报告错误：${detail || `退出码 ${run.status}`}`);
+    }
+  } finally {
+    await fs.unlink(tmp).catch(() => {});
   }
   return { ok: errors.length === 0, errors };
 }

@@ -172,7 +172,7 @@ export class TaduAdapter implements SiteAdapter {
       }
 
       const chapterId = extracted.chapterId || chapter.id;
-      const { blocks, warnings } = parseTaduRenderedChapter(
+      const { blocks } = parseTaduRenderedChapter(
         extracted.html,
         chapterId,
       );
@@ -191,11 +191,11 @@ export class TaduAdapter implements SiteAdapter {
         };
       }
 
-      const allWarnings = [
-        ...warnings,
-        ...taduCharacterWarnings(blocks, chapter.expectedCharacters),
-      ];
-      return { status: 'ok', blocks, warnings: allWarnings };
+      return {
+        status: 'ok',
+        blocks,
+        warnings: taduCharacterWarnings(blocks, chapter.expectedCharacters),
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return {

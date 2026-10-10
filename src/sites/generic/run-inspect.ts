@@ -44,8 +44,13 @@ export async function runInspect(
       url,
       {
         fetchText: async (target) => {
-          const res = await http.get(target, { charset: 'utf-8' });
-          return { status: res.status, text: res.text };
+          try {
+            const res = await http.get(target, { charset: 'auto' });
+            return { status: res.status, text: res.text };
+          } catch {
+            const html = await browser.renderHtml(target);
+            return { status: 200, text: html };
+          }
         },
         render: (target) => browser.renderHtml(target),
       },

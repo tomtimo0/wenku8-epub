@@ -123,6 +123,7 @@ describe('tadu parseRenderedChapter', () => {
     });
     expect(blocks[2]).toMatchObject({ kind: 'image' });
     expect(warnings.some((w) => w.includes('推广段落'))).toBe(true);
+    expect(blocks.length).toBeGreaterThan(0);
   });
 
   it('未找到 #partContent 时返回空与告警', () => {

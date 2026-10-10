@@ -9,6 +9,7 @@
 | --- | --- | --- |
 | 轻小说文库 wenku8 | `wenku8` | 可用：GBK 页面，浏览器会话通过 Cloudflare |
 | 塔读 tadu | `tadu` | 正文经浏览器渲染抓取；登录后章节需 `book2epub login tadu` |
+| 启迪 qidiy | `qidiy` | 规则 + 浏览器（Cloudflare）；目录分页；`book2epub login qidiy` |
 | 声明式规则 | `fic-static` 等 | 内置 JSON 规则（`src/sites/rules/builtin/`） |
 | 其他站点 | `generic` | 启发式探测 → 学到规则或 `RuleAdapter` 抓取 |
 
@@ -75,7 +76,7 @@ npm run dev -- --format both --verify-epub <URL>
 ```bash
 book2epub inspect <url> -o ./output          # 只输出结构诊断到 ./output/inspection.json
 npm run dev -- --experimental-auto --accept-detected <url> --limit-chapters 3
-book2epub scaffold-adapter <siteId> --from ./output/inspection.json --out ./scaffold
+book2epub scaffold-adapter <siteId> --from ./output/inspection.json --out ./scaffold   # 默认生成规则 JSON；加 --typescript 才生成 TS 脚手架
 ```
 
 ## 缓存

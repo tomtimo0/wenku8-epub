@@ -16,7 +16,7 @@ import { parseGenericChapter } from '../src/sites/generic/parse-chapter.js';
 import { probeGeneric, type ProbeTransport } from '../src/sites/generic/probe.js';
 import { GenericAdapter } from '../src/sites/generic/index.js';
 import { experimentalAdapters, defaultAdapters, selectAdapter } from '../src/registry.js';
-import { scaffoldAdapter } from '../src/scaffold.js';
+import { scaffoldAdapter, scaffoldRule } from '../src/scaffold.js';
 
 const fixtures = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -227,6 +227,27 @@ describe('GenericAdapter', () => {
     expect(() =>
       selectAdapter('https://novel.example.com/book/1', defaultAdapters()),
     ).toThrow();
+  });
+});
+
+describe('scaffoldRule', () => {
+  it('依据诊断生成规则 JSON', async () => {
+    const probe = await probeGeneric(
+      ENTRY,
+      fakeTransport({
+        entry: fixture('generic-static.html'),
+        chapter: fixture('generic-chapter.html'),
+      }),
+      { site: 'generic' },
+    );
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'scaffold-rule-'));
+    const result = await scaffoldRule('example', probe.report, dir);
+    expect(result.files.some((f) => f.endsWith('example.json'))).toBe(true);
+    const raw = await fs.readFile(path.join(dir, 'example.json'), 'utf8');
+    const rule = JSON.parse(raw) as { id: string; catalogue: { chapter: string } };
+    expect(rule.id).toBe('example');
+    expect(rule.catalogue.chapter).toBeTruthy();
+    await fs.rm(dir, { recursive: true, force: true });
   });
 });
 

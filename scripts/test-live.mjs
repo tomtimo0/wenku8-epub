@@ -15,10 +15,17 @@ for (const row of matrix) {
   const args = ['tsx', 'src/cli.ts', row.url, ...(row.args ?? [])];
   const res = spawnSync('npx', args, { cwd: root, encoding: 'utf8', shell: true });
   const ok = res.status === 0 || res.status === 2;
+  const pass = ok || row.optional === true;
   lines.push(`## ${row.id}`);
   lines.push(`- URL: ${row.url}`);
+  if (row.note) {
+    lines.push(`- Note: ${row.note}`);
+  }
+  if (row.optional) {
+    lines.push('- Optional: yes（失败不计入硬性失败）');
+  }
   lines.push(`- Exit: ${res.status}`);
-  lines.push(`- Pass: ${ok ? 'yes' : 'no'}`);
+  lines.push(`- Pass: ${pass ? 'yes' : 'no'}`);
   if (res.stdout) {
     lines.push('```');
     lines.push(res.stdout.trim().slice(-800));

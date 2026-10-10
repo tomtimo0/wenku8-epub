@@ -77,7 +77,7 @@ describe('adapter registry', () => {
 describe('builtin rules', () => {
   it('内置规则可匹配并 resolve', async () => {
     const loaded = await loadAllRules();
-    expect(loaded.length).toBeGreaterThanOrEqual(2);
+    expect(loaded.length).toBeGreaterThanOrEqual(3);
     for (const entry of loaded) {
       const adapter = rulesToAdapters([entry])[0];
       const host = entry.rule.match.hosts[0];

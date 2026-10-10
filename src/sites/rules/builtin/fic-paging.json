@@ -9,7 +9,8 @@
     "author": ".author-name"
   },
   "catalogue": {
-    "chapter": ".toc a.chapter-link"
+    "chapter": ".listmain a",
+    "nextPage": ".pagebtn a"
   },
   "chapter": {
     "content": "#content",

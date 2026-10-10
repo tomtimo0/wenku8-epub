@@ -7,7 +7,7 @@ import { allAdapters, selectAdapter } from './registry.js';
 import { runConvert } from './orchestrator.js';
 import { runInspect } from './sites/generic/run-inspect.js';
 import type { InspectionReport } from './sites/generic/index.js';
-import { scaffoldAdapter } from './scaffold.js';
+import { scaffoldAdapter, scaffoldRule } from './scaffold.js';
 import { runLogin } from './commands/login.js';
 import { runDoctor } from './commands/doctor.js';
 import { runRulesList, runRulesValidate } from './commands/rules.js';
@@ -156,7 +156,7 @@ program
 program
   .command('login')
   .description('有头打开站点，人工登录后保存浏览器会话')
-  .argument('<siteOrUrl>', '站点 id（tadu | wenku8）或站点 URL')
+  .argument('<siteOrUrl>', '站点 id（tadu | wenku8 | qidiy）或站点 URL')
   .action(async (siteOrUrl: string) => {
     await runLogin(siteOrUrl, CACHE_DIR);
   });
@@ -258,14 +258,18 @@ program
 
 program
   .command('scaffold-adapter')
-  .description('依据 inspect 诊断生成站点适配器脚手架')
+  .description('依据 inspect 诊断生成站点规则 JSON（默认）或 TypeScript 适配器脚手架')
   .argument('<siteId>', '站点 id，如 example')
   .option('--from <file>', 'inspection.json 路径', path.resolve('output/inspection.json'))
-  .option('--out <dir>', '脚手架输出目录', path.resolve('scaffold'))
+  .option('--out <dir>', '输出目录', path.resolve('scaffold'))
+  .option('--typescript', '生成 TypeScript 适配器脚手架而非规则 JSON')
   .action(async (siteId: string, opts) => {
     const raw = await fs.readFile(path.resolve(opts.from), 'utf8');
     const inspection = JSON.parse(raw) as InspectionReport;
-    const result = await scaffoldAdapter(siteId, inspection, path.resolve(opts.out));
+    const out = path.resolve(opts.out);
+    const result = opts.typescript
+      ? await scaffoldAdapter(siteId, inspection, out)
+      : await scaffoldRule(siteId, inspection, out);
     console.log(`已生成 ${result.files.length} 个文件到 ${result.dir}`);
     for (const f of result.files) {
       console.log(`  - ${f}`);

@@ -111,7 +111,10 @@ export class HttpTransport {
         }
       }
     }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+    throw new Error(lastError == null ? 'HTTP 请求失败' : String(lastError));
   }
 
   private async getOnce(

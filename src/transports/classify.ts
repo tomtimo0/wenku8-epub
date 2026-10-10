@@ -12,6 +12,9 @@ export interface ClassifyInput {
  */
 export function classifyHttpResponse(input: ClassifyInput): ScrapeErrorKind | null {
   const h = input.headers;
+  if (input.status === 403 && /Just a moment|请稍候|challenge-platform/i.test(input.text)) {
+    return 'challenge';
+  }
   if (input.status === 429 || h['retry-after']) {
     return 'rate-limited';
   }

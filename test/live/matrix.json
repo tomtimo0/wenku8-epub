@@ -7,6 +7,15 @@
     "args": ["--no-images", "--limit-chapters", "1"]
   },
   {
+    "id": "qidiy-smoke",
+    "url": "https://www.qidiy.com/book/94389/",
+    "limitChapters": 1,
+    "minOkChapters": 1,
+    "optional": true,
+    "note": "需 book2epub login qidiy 并在 Chromium 中通过 Cloudflare",
+    "args": ["--limit-chapters", "1", "--no-images", "--headful"]
+  },
+  {
     "id": "tadu-smoke",
     "url": "https://www.tadu.com/book/catalogue/1020572",
     "limitChapters": 1,

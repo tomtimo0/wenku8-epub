@@ -20,7 +20,7 @@ import {
 import { RunController } from './core/run.js';
 import { CookieJar, siteCookiesPath } from './transports/cookies.js';
 import { buildTxt } from './output/txt.js';
-import { verifyEpubBuffer } from './output/verify.js';
+import { verifyEpubBufferWithEpubcheck } from './output/verify.js';
 import {
   emptyRunState,
   patchChapterRun,
@@ -188,7 +188,7 @@ export async function runConvert(
         const outPath = path.join(options.out, `${baseName}.epub`);
         await fs.writeFile(outPath, buf);
         if (options.verifyEpub) {
-          const v = await verifyEpubBuffer(buf);
+          const v = await verifyEpubBufferWithEpubcheck(buf);
           if (!v.ok) {
             throw new Error(`EPUB 自检失败：${v.errors.join('; ')}`);
           }
