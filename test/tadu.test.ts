@@ -9,6 +9,7 @@ import {
   parseTaduRenderedChapter,
   taduCharacterWarnings,
 } from '../src/sites/tadu/parse-rendered-chapter.js';
+import { isTaduVerificationPage } from '../src/sites/tadu/adapter.js';
 import {
   catalogueUrl,
   parseTaduInput,
@@ -22,6 +23,14 @@ const fixtures = path.join(
 function fixture(name: string): string {
   return readFileSync(path.join(fixtures, name), 'utf8');
 }
+
+describe('tadu verification page', () => {
+  it('识别验证码壳页', () => {
+    const shell = '<body data-url="http://www.tadu.com/book/catalogue/1"></body><script src="TCaptcha.js">';
+    expect(isTaduVerificationPage(shell)).toBe(true);
+    expect(isTaduVerificationPage(fixture('tadu-catalogue.html'))).toBe(false);
+  });
+});
 
 describe('tadu urls', () => {
   it('接受三类 URL', () => {

@@ -43,7 +43,58 @@ export function parseRuleCatalogueMerged(
     throw new Error('目录为空');
   }
   book.volumes = [{ id: 'main', title: '正文', chapters }];
+  if (rule.catalogue.expandReadNumeric) {
+    expandReadNumericChapters(book, canonicalUrl);
+  }
   return book;
+}
+
+/**
+ * 依据已解析的 read_{n}.html 链接补齐 1..max 章（保留已有标题）
+ * @param book - 书籍
+ * @param canonicalUrl - 目录页 URL
+ */
+export function expandReadNumericChapters(book: Book, canonicalUrl: string): void {
+  const volume = book.volumes[0];
+  if (!volume) {
+    return;
+  }
+  const byNum = new Map<number, Chapter>();
+  let max = 0;
+  for (const ch of volume.chapters) {
+    const m = ch.url.match(/read_(\d+)\.html/i);
+    if (!m) {
+      continue;
+    }
+    const n = Number.parseInt(m[1], 10);
+    if (Number.isNaN(n)) {
+      continue;
+    }
+    max = Math.max(max, n);
+    byNum.set(n, ch);
+  }
+  if (max <= 0) {
+    return;
+  }
+  const origin = new URL(canonicalUrl).origin;
+  const pathSlug = new URL(canonicalUrl).pathname.replace(/\.html$/i, '');
+  const expanded: Chapter[] = [];
+  for (let i = 1; i <= max; i++) {
+    const existing = byNum.get(i);
+    if (existing) {
+      expanded.push(existing);
+      continue;
+    }
+    expanded.push({
+      id: `read_${i}`,
+      title: `第${i}章`,
+      url: `${origin}${pathSlug}/read_${i}.html`,
+      access: 'public',
+      blocks: [],
+      isIllustration: false,
+    });
+  }
+  volume.chapters = expanded;
 }
 
 /**

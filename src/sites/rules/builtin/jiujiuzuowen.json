@@ -1,0 +1,34 @@
+{
+  "id": "jiujiuzuowen",
+  "name": "九九小说网",
+  "version": "1.0.0",
+  "match": { "hosts": ["jiujiuzuowen.com", "www.jiujiuzuowen.com"] },
+  "charset": "auto",
+  "fetch": {
+    "catalogue": "browser",
+    "chapter": "browser",
+    "minIntervalMs": 2000,
+    "waitFor": ".art_cnt, .mulu"
+  },
+  "entry": { "bookId": "slug" },
+  "book": {
+    "title": ".book-info h1",
+    "author": { "selector": ".book-info .writer", "regex": "^(.+?)\\s*著" },
+    "intro": ".book-info .intro",
+    "category": { "selector": ".book-info .tag .blue", "join": " " },
+    "status": { "selector": ".book-info .tag .blue", "join": " " }
+  },
+  "catalogue": {
+    "root": ".mulu",
+    "chapter": "a[href*='/read_']",
+    "order": "desc",
+    "expandReadNumeric": true
+  },
+  "chapter": {
+    "content": ".art_cnt",
+    "remove": [".art_ctrl", "script", "style", "nav", "#footer"],
+    "paragraphMode": "auto",
+    "dropLines": ["作者有话说", "显示所有文的作话", "开文！"]
+  },
+  "assets": { "referer": "page" }
+}

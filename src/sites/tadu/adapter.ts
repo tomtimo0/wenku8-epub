@@ -15,6 +15,18 @@ import {
 } from './parse-rendered-chapter.js';
 import { bookUrl, catalogueUrl, isTaduHost, parseTaduInput } from './urls.js';
 
+/**
+ * 是否为塔读验证码/跳转壳页（无目录正文）
+ * @param html - 响应 HTML
+ */
+export function isTaduVerificationPage(html: string): boolean {
+  return (
+    html.includes('verificationPage') ||
+    html.includes('TCaptcha.js') ||
+    (html.includes('data-url=') && !html.includes('免费章节'))
+  );
+}
+
 /** 塔读章节页内提取结果 */
 interface TaduPageExtract {
   html: string;
@@ -65,15 +77,14 @@ export class TaduAdapter implements SiteAdapter {
    */
   async fetchBook(ref: SourceRef, ctx: ScrapeContext): Promise<Book> {
     const prefix = bookCachePrefix(this.id, ref.bookId);
-    const catalogueRes = await ctx.http.get(ref.canonicalUrl, {
-      charset: 'utf-8',
-    });
-    if (catalogueRes.status !== 200) {
-      throw new Error(`塔读目录页 HTTP ${catalogueRes.status}`);
-    }
-    await ctx.cache.writeText(`${prefix}/catalogue.html`, catalogueRes.text);
+    const catalogueText = await this.fetchTaduHtml(
+      ref.canonicalUrl,
+      ctx,
+      '.directory a[href*="/book/"], .chapter a[href*="/book/"]',
+    );
+    await ctx.cache.writeText(`${prefix}/catalogue.html`, catalogueText);
     const { book, warnings } = parseTaduCatalogue(
-      catalogueRes.text,
+      catalogueText,
       ref.bookId,
       ref.canonicalUrl,
     );
@@ -81,15 +92,40 @@ export class TaduAdapter implements SiteAdapter {
       ctx.cache.writeText(`${prefix}/catalogue.warnings.txt`, w).catch(() => {});
     }
 
-    const infoRes = await ctx.http.get(bookUrl(ref.bookId), {
-      charset: 'utf-8',
-    });
-    if (infoRes.status === 200) {
-      Object.assign(book, parseTaduBookPage(infoRes.text));
+    const infoHtml = await this.fetchTaduHtml(
+      bookUrl(ref.bookId),
+      ctx,
+      'meta[property="og:novel:book_name"], .bookNm',
+    );
+    if (infoHtml) {
+      Object.assign(book, parseTaduBookPage(infoHtml));
     }
 
     await ctx.cache.writeJson(`${prefix}/book.json`, book);
     return book;
+  }
+
+  /**
+   * 塔读 HTTP 常返回腾讯验证码壳页，需回退浏览器渲染后的 HTML。
+   * @param url - 目标 URL
+   * @param ctx - 抓取环境
+   * @param waitSelector - 浏览器等待的选择器
+   */
+  private async fetchTaduHtml(
+    url: string,
+    ctx: ScrapeContext,
+    waitSelector: string,
+  ): Promise<string> {
+    try {
+      const res = await ctx.http.get(url, { charset: 'utf-8' });
+      if (res.status === 200 && !isTaduVerificationPage(res.text)) {
+        return res.text;
+      }
+    } catch {
+      /* 回退浏览器 */
+    }
+    await ctx.browser.ensureStarted();
+    return ctx.browser.renderHtml(url, waitSelector);
   }
 
   /**

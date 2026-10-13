@@ -26,6 +26,8 @@ export interface SiteRule {
   entry?: {
     rewrite?: Array<{ from: string; to: string }>;
     catalogueLink?: string;
+    /** 书号取自路径 basename（去 .html），默认取 URL 中最长数字段 */
+    bookId?: 'slug' | 'numeric';
   };
   book: {
     title: ValueSpec;
@@ -42,6 +44,10 @@ export interface SiteRule {
     nextPage?: string;
     order?: 'asc' | 'desc';
     skipFirst?: number;
+    /**
+     * 目录只展示部分 read_数字 链接时，按最大章号补齐 1..max（九九小说网等）
+     */
+    expandReadNumeric?: boolean;
   };
   chapter: {
     content: string;

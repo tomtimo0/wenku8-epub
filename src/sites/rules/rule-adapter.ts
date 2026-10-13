@@ -77,8 +77,14 @@ export class RuleAdapter implements SiteAdapter {
         catalogue = catalogue.replace(from, to);
       }
     }
-    const nums = catalogue.match(/\d{2,}/g);
-    const bookId = nums?.[nums.length - 1] ?? 'book';
+    let bookId = 'book';
+    if (this.rule.entry?.bookId === 'slug') {
+      const base = catalogue.split('/').filter(Boolean).pop() ?? 'book';
+      bookId = base.replace(/\.html$/i, '');
+    } else {
+      const nums = catalogue.match(/\d{2,}/g);
+      bookId = nums?.[nums.length - 1] ?? 'book';
+    }
     return {
       site: this.id,
       bookId,
@@ -195,8 +201,18 @@ export class RuleAdapter implements SiteAdapter {
         : (this.rule.fetch?.chapter ?? 'http');
     if (mode === 'browser') {
       await ctx.browser.ensureStarted();
-      await ctx.browser.ensureChallengePassed(url);
-      return ctx.browser.renderHtml(url, this.rule.fetch?.waitFor, 1500);
+      const waitFor = this.rule.fetch?.waitFor;
+      const settleMs = 1500;
+      if (kind === 'catalogue') {
+        await ctx.browser.ensureChallengePassed(url);
+        return ctx.browser.renderHtml(url, waitFor, settleMs);
+      }
+      const page = await ctx.browser.acquirePage();
+      try {
+        return await ctx.browser.renderHtmlOnPage(page, url, waitFor, settleMs);
+      } finally {
+        ctx.browser.releasePage(page);
+      }
     }
     const res = await ctx.http.get(url, {
       charset: this.rule.charset ?? 'auto',

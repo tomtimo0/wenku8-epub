@@ -1,3 +1,4 @@
+import { platform } from 'node:os';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import type { Charset } from './http.js';
 import type { CookieJar } from './cookies.js';
@@ -53,24 +54,70 @@ export class BrowserTransport {
     this.starting = null;
   }
 
-  private async launch(): Promise<void> {
+  /**
+   * 在指定 profile 目录启动持久化上下文
+   * @param profileDir - 用户数据目录
+   */
+  private async launchOnProfile(profileDir: string): Promise<BrowserContext> {
     const base = {
       headless: this.options.headless,
       viewport: { width: 1280, height: 800 },
     };
-    const channel = this.options.channel ?? 'chrome';
+    const defaults =
+      platform() === 'win32' ? ['msedge', 'chrome'] : ['chrome', 'msedge'];
+    const channels = [this.options.channel, ...defaults].filter(
+      (c, i, a) => c && a.indexOf(c) === i,
+    ) as string[];
+    let lastError: unknown;
+    for (const channel of channels) {
+      try {
+        return await chromium.launchPersistentContext(profileDir, {
+          ...base,
+          channel,
+        });
+      } catch (e) {
+        lastError = e;
+      }
+    }
     try {
-      this.context = await chromium.launchPersistentContext(
-        this.options.profileDir,
-        { ...base, channel },
-      );
-    } catch {
-      this.context = await chromium.launchPersistentContext(
-        this.options.profileDir,
-        base,
+      return await chromium.launchPersistentContext(profileDir, base);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `已尝试 ${channels.join('、')} 与内置 Chromium：${msg}`,
+        { cause: lastError ?? e },
       );
     }
-    this.defaultPage = this.context.pages()[0] ?? (await this.context.newPage());
+  }
+
+  private async launch(): Promise<void> {
+    const profileDirs = [this.options.profileDir];
+    for (const suffix of ['-fresh', '-scrape']) {
+      const alt = `${this.options.profileDir}${suffix}`;
+      if (!profileDirs.includes(alt)) {
+        profileDirs.push(alt);
+      }
+    }
+    let lastError: unknown;
+    for (const profileDir of profileDirs) {
+      try {
+        this.context = await this.launchOnProfile(profileDir);
+        if (profileDir !== this.options.profileDir) {
+          console.warn(
+            `原浏览器 profile 无法启动，已改用备用目录：${profileDir}（可手动删除损坏的 ${this.options.profileDir} 后重试 login）`,
+          );
+        }
+        lastError = undefined;
+        break;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    if (!this.context) {
+      const msg = lastError instanceof Error ? lastError.message : String(lastError);
+      throw new Error(`无法启动浏览器：${msg}`, { cause: lastError });
+    }
+    this.defaultPage = this.context!.pages()[0] ?? (await this.context!.newPage());
     await this.setupPage(this.defaultPage);
     const size = Math.max(1, this.options.poolSize ?? 1);
     this.pool = [this.defaultPage];
@@ -200,6 +247,22 @@ export class BrowserTransport {
   ): Promise<string> {
     await this.ensureChallengePassed(url);
     const page = this.getPage();
+    return this.renderHtmlOnPage(page, url, waitSelector, settleMs);
+  }
+
+  /**
+   * 在指定页面上打开 URL 并返回渲染后的 HTML（供章节并发时各 worker 独占页面）
+   * @param page - Playwright 页面
+   * @param url - 目标 URL
+   * @param waitSelector - 可选：需先出现的选择器
+   * @param settleMs - 选择器出现后的额外等待
+   */
+  async renderHtmlOnPage(
+    page: Page,
+    url: string,
+    waitSelector?: string,
+    settleMs = 800,
+  ): Promise<string> {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     if (waitSelector) {
       await page
